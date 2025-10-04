@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planetary Defense Simulation Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/js/renderers/CSS2DRenderer.js" crossorigin="anonymous"></script>
+  <script type="module">
+    import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject } from 'https://unpkg.com/three@0.160.0/examples/jsm/renderers/CSS2DRenderer.js';
+    window.__OrbitControlsCtor = OrbitControls;
+    window.__CSS2DRendererCtor = CSS2DRenderer;
+    window.__CSS2DObjectCtor = CSS2DObject;
+  </script>
+  <style>
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+    }
+    body {
+      margin: 0;
+    }
+    /* FX overlay for animations */
+    #fx-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 50; /* above map and panels */
+      overflow: visible;
+    }
+    .asteroid {
+      position: fixed;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ffefcc 0%, #ff9f43 40%, #ff5e00 60%, #7a2a00 100%);
+      box-shadow:
+        0 0 18px 4px rgba(255, 149, 0, 0.6),
+        0 0 40px 10px rgba(255, 90, 0, 0.35);
+      transform: translate(-50%, -50%);
+    }
+    .flash {
+      position: fixed;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,1) 0%, rgba(255,210,140,0.9) 35%, rgba(255,140,0,0.0) 70%);
+      mix-blend-mode: screen;
+      transform: translate(-50%, -50%) scale(0.3);
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* 3D Orbit layer */
+    #orbit3d {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: auto;
+      background: radial-gradient(circle at 50% 20%, #0b1020 0%, #060912 40%, #02040a 100%);
+    }
+    /* a11y helper if Tailwind's sr-only isn't available */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .label {
+      color: #e5e7eb;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.2);
+      pointer-events: none;
+      text-shadow: 0 1px 1px rgba(0,0,0,0.8);
+    }
+  </style>
+</head>
+<body class="font-sans antialiased">
+  <div id="map" class="z-0"></div>
+  <!-- FX Layer for asteroid/impact visuals -->
+  <div id="fx-layer"></div>
+  <div id="orbit3d" aria-label="3D orbital visualization" role="region" class="z-0 hidden"></div>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+  <button id="openControlsBtn" class="fixed bottom-4 right-4 z-20 hidden rounded-full bg-gray-900 text-white text-sm font-medium px-4 py-2 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500">Controls</button>
+
+  <!-- Global Top Navigation for views -->
+  <div id="topNav" class="fixed top-2 left-1/2 -translate-x-1/2 z-30 flex gap-2 bg-white/80 backdrop-blur rounded-full border border-gray-200 shadow px-2 py-1">
+    <button id="navMap2D" role="tab" aria-selected="true" class="px-3 py-1.5 rounded-full text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500">Map 2D</button>
+    <button id="navOrbit3D" role="tab" aria-selected="false" class="px-3 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500">Orbit 3D</button>
+    <button id="navSolar" role="tab" aria-selected="false" class="px-3 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500">Solar System</button>
+  </div>
+
+  <!-- HUD for game and mode info -->
+  <div id="hud" class="fixed top-2 right-2 z-30 hidden bg-gray-900/70 text-white text-xs rounded-lg px-3 py-1.5 shadow">
+    <span id="hudMode">Orbit</span>
+    <span class="mx-1">•</span>
+    Countdown: <span id="hudCountdown">--</span>
+    <span class="mx-1">•</span>
+    Score: <span id="hudScore">0</span>
+  </div>
+
+  <!-- Reset view button (3D modes) -->
+  <button id="resetViewBtn" class="fixed bottom-4 left-4 z-20 hidden rounded-full bg-gray-900 text-white text-sm font-medium px-3 py-2 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500">Reset View</button>
+
+  <!-- Input Panel -->
+  <div id="controlPanel" class="fixed top-4 right-4 z-10 w-11/12 max-w-sm bg-white/80 backdrop-blur border border-gray-200 rounded-xl shadow-lg p-4 md:p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold text-gray-800">Impact Parameters</h2>
+      <button id="closeControlsBtn" class="inline-flex items-center justify-center rounded-md bg-gray-200 text-gray-800 text-xs font-medium px-2 py-1 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400" aria-label="Close controls">×</button>
+    </div>
+    <div class="grid grid-cols-1 gap-3">
+      <label class="block">
+        <span class="text-sm text-gray-700">Asteroid Diameter (m)</span>
+        <input id="diameter" type="number" step="1" min="1" value="250" placeholder="250" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500" />
+      </label>
+      <label class="block">
+        <span class="text-sm text-gray-700">Impact Velocity (km/s)</span>
+        <input id="velocity" type="number" step="0.1" min="0.1" value="20" placeholder="20" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500" />
+      </label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block">
+          <span class="text-sm text-gray-700">Latitude</span>
+          <input id="latitude" type="number" step="0.0001" min="-90" max="90" value="19.0760" placeholder="19.0760" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500" />
+        </label>
+        <label class="block">
+          <span class="text-sm text-gray-700">Longitude</span>
+          <input id="longitude" type="number" step="0.0001" min="-180" max="180" value="72.8777" placeholder="72.8777" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500" />
+        </label>
+      </div>
+      <button id="simulateBtn" class="mt-2 inline-flex items-center justify-center rounded-lg bg-blue-600 text-white font-medium px-4 py-2.5 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">Run Impact Simulation</button>
+
+      <!-- 3D Orbit Controls -->
+      <div class="grid grid-cols-1 gap-3 mt-3" aria-label="3D Orbit Controls">
+        <label class="block">
+          <span class="text-sm text-gray-700">Approach Speed (km/s)</span>
+          <input id="orbitSpeed" type="range" min="1" max="60" step="1" value="20" class="w-full" aria-describedby="orbitSpeedOut" />
+          <div class="text-xs text-gray-600"><span id="orbitSpeedOut">20</span> km/s</div>
+        </label>
+        <label class="block">
+          <span class="text-sm text-gray-700">Deflection Strategy</span>
+          <select id="deflectionStrategy" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500">
+            <option value="none">None</option>
+            <option value="kinetic">Kinetic Impactor</option>
+            <option value="tractor">Gravity Tractor</option>
+            <option value="nuclear">Nuclear Standoff</option>
+          </select>
+        </label>
+        <div class="flex items-center gap-2">
+          <button id="launchDeflectionBtn" class="inline-flex items-center justify-center rounded-lg bg-emerald-600 text-white text-sm font-medium px-3 py-2 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">Launch Deflection</button>
+          <button id="startGameBtn" class="inline-flex items-center justify-center rounded-lg bg-purple-600 text-white text-sm font-medium px-3 py-2 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500">Start Defend Earth</button>
+        </div>
+        <div class="flex items-center justify-between text-xs text-gray-700">
+          <div>Countdown: <span id="gameCountdown">--</span></div>
+          <div>Score: <span id="gameScore">0</span></div>
+        </div>
+        <label class="block">
+          <span class="text-sm text-gray-700">Language</span>
+          <select id="langSelect" class="mt-1 w-full rounded-lg border-gray-300 focus:border-blue-500 focus:ring-blue-500">
+            <option value="en">English</option>
+            <option value="es">Español</option>
+          </select>
+        </label>
+        <button id="storyBtn" class="inline-flex items-center justify-center rounded-lg bg-amber-600 text-white text-sm font-medium px-3 py-2 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500">Story Mode: Impactor‑2025</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results Panel -->
+  <div class="fixed left-1/2 -translate-x-1/2 md:left-4 md:translate-x-0 bottom-4 z-10 w-11/12 max-w-xl bg-white/85 backdrop-blur border border-gray-200 rounded-xl shadow-lg p-4 md:p-5">
+    <h2 class="text-lg font-semibold text-gray-800 mb-3">Simulation Results</h2>
+    <div id="results" class="text-sm text-gray-800 grid grid-cols-1 md:grid-cols-2 gap-y-1 gap-x-6">
+      <div><span class="font-medium">Energy:</span> <span id="energyMT">-</span> MT TNT</div>
+      <div><span class="font-medium">Crater Radius:</span> <span id="craterRadius">-</span> m</div>
+      <div><span class="font-medium">Seismic Magnitude (Mw):</span> <span id="seismic">-</span></div>
+      <div class="col-span-1 md:col-span-2"><span class="font-medium">Damage Radii (km):</span></div>
+      <div>Severe (35 kPa): <span id="rSevere">-</span></div>
+      <div>Moderate (10 kPa): <span id="rModerate">-</span></div>
+      <div>Light (1 kPa): <span id="rLight">-</span></div>
+    </div>
+  </div>
+
+  <!-- Story Panel -->
+  <div id="storyPanel" class="fixed top-4 left-4 z-20 w-11/12 max-w-md bg-white/90 backdrop-blur border border-gray-200 rounded-xl shadow-lg p-4 md:p-5 hidden" role="dialog" aria-modal="false" aria-labelledby="storyTitle">
+    <h2 id="storyTitle" class="text-lg font-semibold text-gray-800 mb-2">Impactor‑2025</h2>
+    <p id="storyText" class="text-sm text-gray-800">A newly detected NEO is on a potential collision course. Your mission: plan a deflection.</p>
+    <div class="mt-3 flex gap-2">
+      <button id="storyNext" class="rounded-lg bg-amber-600 text-white text-sm font-medium px-3 py-2 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500">Next</button>
+      <button id="storyClose" class="rounded-lg bg-gray-200 text-gray-800 text-sm font-medium px-3 py-2 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">Close</button>
+    </div>
+  </div>
+
+  <script>
+    // Constants
+    const g0 = 9.80665; // m/s^2
+    const DENSITY_ASTEROID = 3000.0; // kg/m^3
+    const ENERGY_TO_MEGATONS = 4.184e15; // J per MT
+    const EARTH_RADIUS_M = 6371000.0;
+    const SEISMIC_COUPLING = 1e-5; // fraction
+    const CRATER_EXPONENT = 1.0 / 3.4;
+    const CRATER_CONSTANT = 5.0e-2;
+
+    // Utility
+    function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+    function roundTo(x, digits=2) {
+      const p = Math.pow(10, digits);
+      return Math.round((x + Number.EPSILON) * p) / p;
+    }
+
+    // Physics functions
+    function massFromDiameter(d_m, density = DENSITY_ASTEROID) {
+      const r = d_m / 2.0;
+      const volume = (4.0/3.0) * Math.PI * Math.pow(r, 3);
+      return density * volume;
+    }
+
+    function kineticEnergyJoules(d_m, v_kmps, density = DENSITY_ASTEROID) {
+      const m = massFromDiameter(d_m, density);
+      const v = v_kmps * 1000.0; // m/s
+      return 0.5 * m * v * v;
+    }
+
+    function joulesToMegatons(joules) {
+      return joules / ENERGY_TO_MEGATONS;
+    }
+
+    function estimateCraterRadiusM(energy_j) {
+      // Simplified scaling law: R = C * E^{exp}
+      return CRATER_CONSTANT * Math.pow(energy_j, CRATER_EXPONENT);
+    }
+
+    function estimateSeismicMagnitude(energy_j) {
+      // Convert to seismic energy via coupling and scale to Mw
+      const E_seis = energy_j * SEISMIC_COUPLING;
+      // Empirical relation: Mw ≈ (2/3)*log10(E[J]) - 3.2
+      const Mw = (2.0/3.0) * Math.log10(Math.max(E_seis, 1.0)) - 3.2;
+      return Mw;
+    }
+
+    function overpressureFromEnergyAtDistance(E_megatons, distance_km) {
+      // Nuclear-like blast scaling (approx.):
+      // Scaled distance Z = R / W^{1/3}
+      // Incident overpressure (psi) ≈ 1772/Z^3 + 114/Z^2 + 10.4/Z
+      // Convert psi to kPa: 1 psi = 6.89476 kPa
+      const W = Math.max(E_megatons, 1e-9);
+      const R_m = Math.max(distance_km, 1e-6) * 1000.0;
+      const Z = R_m / Math.cbrt(W);
+      const psi = 1772.0/Math.pow(Z,3) + 114.0/Math.pow(Z,2) + 10.4/Math.max(Z,1e-6);
+      const kPa = psi * 6.89476;
+      return kPa;
+    }
+
+    function calculateDamageRadii(E_megatons) {
+      const targets = [35.0, 10.0, 1.0]; // kPa thresholds
+      const names = ["severe", "moderate", "light"];
+      const result = {};
+      for (let i=0; i<targets.length; i++) {
+        const target = targets[i];
+        // Bisection on distance in km
+        let lo = 0.01; // km
+        let hi = 5000.0; // km upper bound
+        // Ensure hi is low enough that overpressure at hi < target
+        for (let j=0; j<30; j++) {
+          const p_at_hi = overpressureFromEnergyAtDistance(E_megatons, hi);
+          if (p_at_hi < target) break;
+          hi *= 2; if (hi > 20000) break;
+        }
+        for (let it=0; it<80; it++) {
+          const mid = 0.5*(lo+hi);
+          const p = overpressureFromEnergyAtDistance(E_megatons, mid);
+          if (p > target) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        const d_km = 0.5*(lo+hi);
+        result[names[i]] = d_km;
+      }
+      return result;
+    }
+
+    function simulateImpact(diameter_m, velocity_kms, lat, lon) {
+      const E_j = kineticEnergyJoules(diameter_m, velocity_kms, DENSITY_ASTEROID);
+      const E_mt = joulesToMegatons(E_j);
+      const crater_m = estimateCraterRadiusM(E_j);
+      const Mw = estimateSeismicMagnitude(E_j);
+      const radii = calculateDamageRadii(E_mt);
+
+      return {
+        inputs: { diameter_m, velocity_kms, lat, lon },
+        constants: {
+          g0, DENSITY_ASTEROID, ENERGY_TO_MEGATONS, EARTH_RADIUS_M, SEISMIC_COUPLING, CRATER_EXPONENT, CRATER_CONSTANT
+        },
+        results: {
+          energy_joules: E_j,
+          energy_megatons: E_mt,
+          crater_radius_m: crater_m,
+          seismic_mw: Mw,
+          damage_radii_km: radii
+        }
+      };
+    }
+
+    // Map setup
+    const map = L.map('map', { zoomControl: true });
+    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Default view
+    const defaultLat = 19.0760;
+    const defaultLon = 72.8777;
+    map.setView([defaultLat, defaultLon], 6);
+
+    let impactMarker = null;
+    let craterCircle = null;
+    let severeCircle = null;
+    let moderateCircle = null;
+    let lightCircle = null;
+
+    function clearOverlays() {
+      [impactMarker, craterCircle, severeCircle, moderateCircle, lightCircle].forEach(layer => {
+        if (layer) { map.removeLayer(layer); }
+      });
+      impactMarker = craterCircle = severeCircle = moderateCircle = lightCircle = null;
+      // Clear FX DOM
+      const fx = document.getElementById('fx-layer');
+      if (fx) fx.innerHTML = '';
+    }
+
+    // Animation helpers
+    function animateCircleRadius(circle, target, duration = 1.0, delay = 0) {
+      const state = { r: 0 };
+      try { circle.setRadius(0); } catch (e) {}
+      gsap.to(state, {
+        r: target,
+        duration,
+        delay,
+        ease: 'power2.out',
+        onUpdate: () => circle.setRadius(state.r)
+      });
+    }
+
+    function flashAt(x, y) {
+      const fx = document.getElementById('fx-layer');
+      if (!fx) return;
+      const flash = document.createElement('div');
+      flash.className = 'flash';
+      fx.appendChild(flash);
+      gsap.set(flash, { x, y, opacity: 0 });
+      gsap.timeline()
+        .to(flash, { opacity: 1, scale: 1.1, duration: 0.12, ease: 'power3.out' })
+        .to(flash, { opacity: 0, scale: 1.8, duration: 0.35, ease: 'power2.in' }, '+=0.05')
+        .add(() => flash.remove());
+    }
+
+    function playImpactAnimation(lat, lon) {
+      const fx = document.getElementById('fx-layer');
+      if (!fx) return;
+      // Determine impact pixel position relative to viewport
+      const rect = map.getContainer().getBoundingClientRect();
+      const pt = map.latLngToContainerPoint([lat, lon]);
+      const x = rect.left + pt.x;
+      const y = rect.top + pt.y;
+
+      // Start point: offscreen above-left
+      const startX = x - 700;
+      const startY = y - 450;
+
+      const asteroid = document.createElement('div');
+      asteroid.className = 'asteroid';
+      fx.appendChild(asteroid);
+
+      gsap.set(asteroid, { x: startX, y: startY, scale: 0.7, rotate: -35 });
+      gsap.to(asteroid, {
+        x: x,
+        y: y,
+        duration: 1.1,
+        ease: 'power2.in',
+        onComplete: () => {
+          asteroid.remove();
+          flashAt(x, y);
+        }
+      });
+    }
+
+    // --- 3D Orbit Visualization (Three.js) ---
+    const orbitState = {
+      mode: 'orbit', // 'orbit' | 'sol'
+      enabled: false,
+      initialized: false,
+      autoDeflect: false,
+      speed: 20,
+      diameter: 250,
+      strategy: 'none',
+      deflected: false,
+      t: 0,
+      tDeflect: 0.6,
+      minApproach: Infinity,
+      game: { active: false, endAt: 0, score: 0, timerId: null },
+      solarInitialized: false
+    };
+
+    let three = { renderer: null, labelRenderer: null, scene: null, camera: null, earth: null, clouds: null, atmosphere: null, asteroid: null, approachLine: null, deflectLine: null, controls: null, raf: 0, solarGroup: null, sun: null, solarLight: null, planets: [], orbitLines: [], interactionBound: false };
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    function announce(msg) {
+      const a = document.getElementById('announcer');
+      if (a) { a.textContent = msg; }
+    }
+
+    function initOrbit3D() {
+      if (orbitState.initialized) return;
+      if (typeof THREE === 'undefined') { console.warn('THREE not loaded'); return; }
+      const container = document.getElementById('orbit3d');
+      three.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      three.renderer.setPixelRatio(window.devicePixelRatio || 1);
+      three.renderer.setSize(window.innerWidth, window.innerHeight);
+      container.appendChild(three.renderer.domElement);
+
+      const LabelRendererCtor = window.__CSS2DRendererCtor || (THREE.CSS2DRenderer ? THREE.CSS2DRenderer : null);
+      if (LabelRendererCtor) {
+        three.labelRenderer = new LabelRendererCtor();
+        three.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        three.labelRenderer.domElement.style.position = 'absolute';
+        three.labelRenderer.domElement.style.top = '0px';
+        three.labelRenderer.domElement.style.pointerEvents = 'none';
+        container.appendChild(three.labelRenderer.domElement);
+      }
+
+      three.scene = new THREE.Scene();
+      three.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      three.camera.position.set(0, 0, 4.2);
+
+      // Controls for rotate/pan/zoom
+      const ControlsCtor = window.__OrbitControlsCtor || (THREE.OrbitControls ? THREE.OrbitControls : null);
+      if (ControlsCtor) {
+        three.controls = new ControlsCtor(three.camera, three.renderer.domElement);
+        three.controls.enableDamping = true;
+        three.controls.dampingFactor = 0.06;
+        three.controls.enablePan = true;
+        three.controls.minDistance = 1.4;
+        three.controls.maxDistance = 12;
+        // improve pointer behavior on touch/wheel
+        three.renderer.domElement.style.touchAction = 'none';
+        three.renderer.domElement.style.cursor = 'grab';
+        three.renderer.domElement.addEventListener('pointerdown', ()=> three.renderer.domElement.style.cursor = 'grabbing');
+        window.addEventListener('pointerup', ()=> three.renderer.domElement.style.cursor = 'grab');
+      }
+
+      const amb = new THREE.AmbientLight(0x88aaff, 0.45); three.scene.add(amb);
+      const dir = new THREE.DirectionalLight(0xffffff, 1.1); dir.position.set(5, 3, 3); three.scene.add(dir);
+
+      // Realistic Earth materials
+      const loader = new THREE.TextureLoader();
+      const texColor = loader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg');
+      const texNormal = loader.load('https://threejs.org/examples/textures/planets/earth_normal_2048.jpg');
+      const texSpec = loader.load('https://threejs.org/examples/textures/planets/earth_specular_2048.jpg');
+
+      const earthGeom = new THREE.SphereGeometry(1, 64, 64);
+      const earthMat = new THREE.MeshPhongMaterial({
+        map: texColor,
+        normalMap: texNormal,
+        specularMap: texSpec,
+        shininess: 12
+      });
+      three.earth = new THREE.Mesh(earthGeom, earthMat);
+      three.scene.add(three.earth);
+
+      // Atmosphere glow (backside, additive)
+      const atmoVertex = `
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+      const atmoFragment = `
+        varying vec3 vNormal;
+        uniform vec3 glowColor;
+        void main() {
+          float intensity = pow(max(0.0, 0.6 - vNormal.z), 3.2);
+          gl_FragColor = vec4(glowColor, intensity * 0.9);
+        }
+      `;
+      const atmoMat = new THREE.ShaderMaterial({
+        uniforms: { glowColor: { value: new THREE.Color(0x5ac8ff) } },
+        vertexShader: atmoVertex,
+        fragmentShader: atmoFragment,
+        side: THREE.BackSide,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      three.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.06, 64, 64), atmoMat);
+      three.scene.add(three.atmosphere);
+
+      // Cloud layer
+      const cloudsTex = loader.load('https://threejs.org/examples/textures/planets/earth_clouds_1024.png');
+      const cloudsGeom = new THREE.SphereGeometry(1.01, 64, 64);
+      const cloudsMat = new THREE.MeshPhongMaterial({ map: cloudsTex, transparent: true, opacity: 0.45, depthWrite: false });
+      three.clouds = new THREE.Mesh(cloudsGeom, cloudsMat);
+      three.scene.add(three.clouds);
+
+      // Simple starfield (points)
+      const starGeom = new THREE.BufferGeometry();
+      const starCnt = 1500;
+      const positions = new Float32Array(starCnt * 3);
+      for (let i = 0; i < starCnt; i++) {
+        const r = 60 + Math.random() * 60;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = r * Math.cos(phi);
+      }
+      starGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, sizeAttenuation: true });
+      const stars = new THREE.Points(starGeom, starMat);
+      three.scene.add(stars);
+      // Galaxy skybox (inside-out sphere)
+      const galaxyTex = loader.load('https://threejs.org/examples/textures/galaxy_starfield.png');
+      const galaxyGeom = new THREE.SphereGeometry(120, 64, 64);
+      const galaxyMat = new THREE.MeshBasicMaterial({ map: galaxyTex, side: THREE.BackSide, depthWrite: false });
+      const galaxy = new THREE.Mesh(galaxyGeom, galaxyMat);
+      three.scene.add(galaxy);
+
+      const astGeom = new THREE.SphereGeometry(Math.max(0.06, orbitState.diameter / 4000), 16, 16);
+      const astMat = new THREE.MeshStandardMaterial({ color: 0xff7f0e, emissive: 0x331100, emissiveIntensity: 0.5 });
+      three.asteroid = new THREE.Mesh(astGeom, astMat);
+      three.scene.add(three.asteroid);
+
+      // Labels for major cities
+      addCityLabel('New York', 40.7128, -74.0060);
+      addCityLabel('London', 51.5074, -0.1278);
+      addCityLabel('Mumbai', 19.0760, 72.8777);
+      addCityLabel('Tokyo', 35.6762, 139.6503);
+      addCityLabel('Sydney', -33.8688, 151.2093);
+
+      rebuildOrbitPaths();
+      orbitState.initialized = true;
+      animateOrbit();
+
+      window.addEventListener('resize', onOrbitResize);
+    }
+
+    function onOrbitResize() {
+      if (!orbitState.initialized) return;
+      const w = window.innerWidth, h = window.innerHeight;
+      three.renderer.setSize(w, h);
+      if (three.labelRenderer) three.labelRenderer.setSize(w, h);
+      three.camera.aspect = w / h;
+      three.camera.updateProjectionMatrix();
+      if (three.controls) three.controls.update();
+    }
+
+    function approachPosition(t) {
+      const r = 6; // nominal far range
+      const ang = (-1.2) + (1.4 * t); // sweep past Earth
+      const x = r * Math.cos(ang);
+      const z = r * Math.sin(ang);
+      const y = 0.2 * (1.2 - 2.2 * t);
+      return new THREE.Vector3(x, y, z);
+    }
+
+    function deflectionDelta(strategy) {
+      switch (strategy) {
+        case 'kinetic': return new THREE.Vector3(0.35, 0.05, 0.25);
+        case 'tractor': return new THREE.Vector3(0.08, 0.02, 0.04);
+        case 'nuclear': return new THREE.Vector3(0.65, 0.12, 0.35);
+        default: return new THREE.Vector3(0, 0, 0);
+      }
+    }
+
+    function deflectionPosition(t) {
+      const t0 = orbitState.tDeflect;
+      const p0 = approachPosition(t0);
+      const delta = deflectionDelta(orbitState.strategy);
+      const u = Math.max(0, Math.min(1, (t - t0) / (1 - t0)));
+      return new THREE.Vector3(
+        p0.x + (delta.x + 1.2) * u,
+        p0.y + (delta.y) * u,
+        p0.z + (delta.z + 0.6) * u
+      );
+    }
+
+    function rebuildOrbitPaths() {
+      // remove old
+      if (three.approachLine) { three.scene.remove(three.approachLine); three.approachLine.geometry.dispose(); three.approachLine.material.dispose(); three.approachLine = null; }
+      if (three.deflectLine) { three.scene.remove(three.deflectLine); three.deflectLine.geometry.dispose(); three.deflectLine.material.dispose(); three.deflectLine = null; }
+      // approach
+      const points = [];
+      for (let i = 0; i <= 100; i++) { const t = i / 100; points.push(approachPosition(t)); }
+      const geom = new THREE.BufferGeometry().setFromPoints(points);
+      three.approachLine = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x9aa4b2 }));
+      three.scene.add(three.approachLine);
+      // deflection (if already deflected)
+      if (orbitState.deflected && orbitState.strategy !== 'none') {
+        const dpts = [];
+        for (let i = 0; i <= 100; i++) { const t = orbitState.tDeflect + (1 - orbitState.tDeflect) * (i / 100); dpts.push(deflectionPosition(t)); }
+        const dgeom = new THREE.BufferGeometry().setFromPoints(dpts);
+        three.deflectLine = new THREE.Line(dgeom, new THREE.LineDashedMaterial({ color: 0x2ca02c, dashSize: 0.06, gapSize: 0.03 }));
+        three.deflectLine.computeLineDistances();
+        three.scene.add(three.deflectLine);
+      }
+    }
+
+    function resetOrbitRun() {
+      orbitState.t = 0; orbitState.deflected = false; orbitState.minApproach = Infinity;
+      if (three.asteroid) three.asteroid.position.copy(approachPosition(0));
+      rebuildOrbitPaths();
+    }
+
+    // Helpers for labels on globe
+    function latLonToVec3(latDeg, lonDeg, radius = 1.02) {
+      const lat = latDeg * Math.PI / 180;
+      const lon = lonDeg * Math.PI / 180;
+      const x = radius * Math.cos(lat) * Math.cos(lon);
+      const y = radius * Math.sin(lat);
+      const z = radius * Math.cos(lat) * Math.sin(lon);
+      return new THREE.Vector3(x, y, z);
+    }
+    function addCityLabel(name, lat, lon) {
+      const LabelObjectCtor = window.__CSS2DObjectCtor || (THREE.CSS2DObject ? THREE.CSS2DObject : null);
+      if (!LabelObjectCtor) return;
+      const el = document.createElement('div');
+      el.className = 'label';
+      el.textContent = name;
+      el.setAttribute('role', 'note');
+      el.setAttribute('aria-label', name);
+      const obj = new LabelObjectCtor(el);
+      obj.position.copy(latLonToVec3(lat, lon));
+      three.scene.add(obj);
+      return obj;
+    }
+
+    function initSolarSystem() {
+      if (orbitState.solarInitialized) return;
+      three.solarGroup = new THREE.Group();
+      three.scene.add(three.solarGroup);
+
+      // Sun
+      const sunGeom = new THREE.SphereGeometry(2.0, 64, 64);
+      const texLoader = new THREE.TextureLoader();
+      const sunTex = texLoader.load('https://threejs.org/examples/textures/planets/sun.jpg');
+      const sunMat = new THREE.MeshBasicMaterial({ map: sunTex });
+      three.sun = new THREE.Mesh(sunGeom, sunMat);
+      three.solarGroup.add(three.sun);
+      // Sun glow sprite
+      const glowTex = texLoader.load('https://threejs.org/examples/textures/lensflare/lensflare0.png');
+      const glowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffdd88, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+      const glow = new THREE.Sprite(glowMat);
+      glow.scale.set(10, 10, 1);
+      three.sun.add(glow);
+      three.solarLight = new THREE.PointLight(0xffffff, 2.0, 0, 2);
+      three.solarLight.position.set(0, 0, 0);
+      three.solarGroup.add(three.solarLight);
+
+      // Planets (highly scaled for visualization)
+      const planetDefs = [
+        { name: 'Mercury', radius: 0.08, orbit: 4.0, speed: 4.15, color: 0xb1a9a0 },
+        { name: 'Venus',   radius: 0.20, orbit: 5.2, speed: 1.62, color: 0xc6a66a },
+        { name: 'Earth',   radius: 0.21, orbit: 6.5, speed: 1.0,  color: 0x2a7bd5 },
+        { name: 'Mars',    radius: 0.12, orbit: 8.0, speed: 0.53, color: 0xc1440e },
+        { name: 'Jupiter', radius: 1.0,  orbit: 11.0, speed: 0.084, color: 0xd2b48c },
+        { name: 'Saturn',  radius: 0.85, orbit: 14.0, speed: 0.034, color: 0xd8c080, ring: true },
+        { name: 'Uranus',  radius: 0.45, orbit: 17.0, speed: 0.012, color: 0x78b7c5 },
+        { name: 'Neptune', radius: 0.43, orbit: 20.0, speed: 0.006, color: 0x4363d8 }
+      ];
+
+      // reuse the same texture loader defined above
+      planetDefs.forEach(def => {
+        const geom = new THREE.SphereGeometry(def.radius, 48, 48);
+        let mat;
+        const urlMap = {
+          'Mercury': 'https://threejs.org/examples/textures/planets/mercury.jpg',
+          'Venus':   'https://threejs.org/examples/textures/planets/venus.jpg',
+          'Earth':   'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg',
+          'Mars':    'https://threejs.org/examples/textures/planets/mars_1024.jpg',
+          'Jupiter': 'https://threejs.org/examples/textures/planets/jupiter.jpg',
+          'Saturn':  'https://threejs.org/examples/textures/planets/saturn.jpg',
+          'Uranus':  'https://threejs.org/examples/textures/planets/uranus.jpg',
+          'Neptune': 'https://threejs.org/examples/textures/planets/neptune.jpg'
+        }[def.name];
+        if (urlMap) {
+          const tex = texLoader.load(urlMap, undefined, undefined, () => {});
+          mat = new THREE.MeshPhongMaterial({ map: tex, color: def.color });
+        } else {
+          mat = new THREE.MeshPhongMaterial({ color: def.color });
+        }
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.userData.planetName = def.name;
+        three.solarGroup.add(mesh);
+        // Orbit ring
+        const ringGeom = new THREE.BufferGeometry();
+        const seg = 180;
+        const verts = new Float32Array((seg+1)*3);
+        for (let i=0;i<=seg;i++) {
+          const a = i/seg * Math.PI*2;
+          verts[i*3] = def.orbit*Math.cos(a);
+          verts[i*3+1] = 0;
+          verts[i*3+2] = def.orbit*Math.sin(a);
+        }
+        ringGeom.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+        const ring = new THREE.Line(ringGeom, new THREE.LineBasicMaterial({ color: 0x8b949e, transparent: true, opacity: 0.35 }));
+        three.solarGroup.add(ring);
+
+        // Planet label
+        if (window.__CSS2DObjectCtor) {
+          const labelEl = document.createElement('div');
+          labelEl.className = 'label';
+          labelEl.textContent = def.name;
+          const labelObj = new window.__CSS2DObjectCtor(labelEl);
+          labelObj.position.set(0, def.radius * 1.6, 0);
+          mesh.add(labelObj);
+        }
+
+        three.planets.push({ def, mesh, angle: Math.random()*Math.PI*2 });
+        three.orbitLines.push(ring);
+
+        // Saturn rings
+        if (def.ring) {
+          const ringTex = texLoader.load('https://threejs.org/examples/textures/planets/saturnring.png');
+          const ringGeom2 = new THREE.RingGeometry(def.radius*1.3, def.radius*2.0, 64);
+          const ringMat2 = new THREE.MeshBasicMaterial({ map: ringTex, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+          const ringMesh2 = new THREE.Mesh(ringGeom2, ringMat2);
+          ringMesh2.rotation.x = Math.PI/2;
+          mesh.add(ringMesh2);
+        }
+      });
+
+      three.solarGroup.visible = false;
+      orbitState.solarInitialized = true;
+    }
+
+    function updateSolar(dt) {
+      if (!orbitState.solarInitialized) return;
+      // Animate revolution (dt in seconds approx)
+      const speedScale = 0.3;
+      three.planets.forEach(p => {
+        p.angle += dt * p.def.speed * speedScale * 0.2;
+        const r = p.def.orbit;
+        p.mesh.position.set(r*Math.cos(p.angle), 0, r*Math.sin(p.angle));
+        p.mesh.rotation.y += 0.01;
+      });
+    }
+
+    function add3DInteractionListeners() {
+      if (three.interactionBound || !three.renderer) return;
+      const el = three.renderer.domElement;
+      const getIntersections = (event) => {
+        const rect = el.getBoundingClientRect();
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, three.camera);
+        const targets = three.planets.map(p => p.mesh);
+        return raycaster.intersectObjects(targets, false);
+      };
+      el.addEventListener('pointermove', (e) => {
+        if (orbitState.mode !== 'sol') return;
+        const hits = getIntersections(e);
+        if (hits.length > 0) {
+          el.style.cursor = 'pointer';
+        } else {
+          // revert to grab/grabbing depending on pointer state
+          if (document.pointerLockElement === el) return;
+          el.style.cursor = 'grab';
+        }
+      });
+      el.addEventListener('click', (e) => {
+        if (orbitState.mode !== 'sol') return;
+        const hits = getIntersections(e);
+        if (hits.length === 0) return;
+        const mesh = hits[0].object;
+        const planet = three.planets.find(p => p.mesh === mesh || mesh.parent === p.mesh);
+        if (!planet) return;
+        focusOnPlanet(planet);
+      });
+      three.interactionBound = true;
+    }
+
+    function focusOnPlanet(planet) {
+      if (!three.controls) return;
+      const target = planet.mesh.position.clone();
+      const dir = target.clone().normalize();
+      const dist = Math.max(planet.def.radius * 6, 2.5);
+      const desired = target.clone().add(new THREE.Vector3(dir.x, dir.y + 0.2, dir.z).normalize().multiplyScalar(dist));
+      gsap.to(three.controls.target, { x: target.x, y: target.y, z: target.z, duration: 1.0, ease: 'power2.out', onUpdate: () => three.controls.update() });
+      gsap.to(three.camera.position, { x: desired.x, y: desired.y, z: desired.z, duration: 1.2, ease: 'power2.out', onUpdate: () => three.controls.update() });
+    }
+
+    function animateOrbit() {
+      if (!orbitState.initialized) return;
+      const dt = 0.016 * (orbitState.speed / 20);
+      orbitState.t += dt * 0.12;
+
+      if (orbitState.mode === 'sol') {
+        updateSolar(dt);
+      }
+
+      if (!orbitState.deflected && orbitState.t >= orbitState.tDeflect && orbitState.strategy !== 'none' && orbitState.autoDeflect) {
+        orbitState.deflected = true;
+        announce('Deflection executed: ' + orbitState.strategy);
+        rebuildOrbitPaths();
+      }
+
+      let pos;
+      if (!orbitState.deflected || orbitState.strategy === 'none' || orbitState.t < orbitState.tDeflect) pos = approachPosition(orbitState.t);
+      else pos = deflectionPosition(orbitState.t);
+      three.asteroid.position.copy(pos);
+      const d = pos.length(); if (d < orbitState.minApproach) orbitState.minApproach = d;
+
+      // earth and clouds rotation
+      three.earth.rotation.y += 0.0013;
+      if (three.clouds) three.clouds.rotation.y += 0.0025;
+
+      if (three.controls) three.controls.update();
+      three.renderer.render(three.scene, three.camera);
+      if (three.labelRenderer) three.labelRenderer.render(three.scene, three.camera);
+      three.raf = requestAnimationFrame(animateOrbit);
+
+      // if pass is complete, auto-score during game
+      if (orbitState.t > 1.05 && orbitState.game.active) {
+        const points = orbitState.minApproach > 1.1 ? 100 : -50;
+        orbitState.game.score += points;
+        updateGameUI();
+        resetOrbitRun();
+      }
+    }
+
+    function updateGameUI() {
+      const c = document.getElementById('gameCountdown');
+      const s = document.getElementById('gameScore');
+      if (c) {
+        const remaining = Math.max(0, Math.ceil((orbitState.game.endAt - Date.now()) / 1000));
+        c.textContent = orbitState.game.active ? remaining + 's' : '--';
+      }
+      if (s) s.textContent = String(orbitState.game.score);
+      updateHUD();
+    }
+
+    function startGame() {
+      orbitState.game.active = true;
+      orbitState.game.score = 0;
+      orbitState.game.endAt = Date.now() + 30000; // 30s
+      updateGameUI();
+      if (orbitState.game.timerId) clearInterval(orbitState.game.timerId);
+      orbitState.game.timerId = setInterval(() => {
+        updateGameUI();
+        if (Date.now() >= orbitState.game.endAt) {
+          clearInterval(orbitState.game.timerId);
+          orbitState.game.active = false;
+          announce('Game over. Final score: ' + orbitState.game.score);
+          updateGameUI();
+        }
+      }, 250);
+      resetOrbitRun();
+    }
+
+    // --- UI wiring ---
+    // Top nav buttons
+    const navMap2D = document.getElementById('navMap2D');
+    const navOrbit3D = document.getElementById('navOrbit3D');
+    const navSolar = document.getElementById('navSolar');
+    const orbitSpeedEl = document.getElementById('orbitSpeed');
+    const orbitSpeedOut = document.getElementById('orbitSpeedOut');
+    const strategyEl = document.getElementById('deflectionStrategy');
+    const launchBtn = document.getElementById('launchDeflectionBtn');
+    const startGameBtn = document.getElementById('startGameBtn');
+    const langSelect = document.getElementById('langSelect');
+    const storyBtn = document.getElementById('storyBtn');
+    const storyPanel = document.getElementById('storyPanel');
+    const storyNext = document.getElementById('storyNext');
+    const storyClose = document.getElementById('storyClose');
+    const controlPanelEl = document.getElementById('controlPanel');
+    const openControlsBtn = document.getElementById('openControlsBtn');
+    const closeControlsBtn = document.getElementById('closeControlsBtn');
+    const resetViewBtn = document.getElementById('resetViewBtn');
+
+    // HUD elements
+    const hud = document.getElementById('hud');
+    const hudMode = document.getElementById('hudMode');
+    const hudCountdown = document.getElementById('hudCountdown');
+    const hudScore = document.getElementById('hudScore');
+
+    const PREF_KEY_TAB = 'pdd_active_tab';
+    const PREF_KEY_CONTROLS = 'pdd_controls_visible';
+
+    function hideControlPanel() {
+      if (controlPanelEl) controlPanelEl.classList.add('hidden');
+      if (openControlsBtn) openControlsBtn.classList.remove('hidden');
+      try { localStorage.setItem(PREF_KEY_CONTROLS, 'hidden'); } catch (e) {}
+    }
+    function showControlPanel() {
+      if (controlPanelEl) controlPanelEl.classList.remove('hidden');
+      if (openControlsBtn) openControlsBtn.classList.add('hidden');
+      try { localStorage.setItem(PREF_KEY_CONTROLS, 'visible'); } catch (e) {}
+    }
+
+    function setEarthOnlyVisible(v) {
+      if (three.earth) three.earth.visible = v;
+      if (three.clouds) three.clouds.visible = v;
+      if (three.atmosphere) three.atmosphere.visible = v;
+      if (three.asteroid) three.asteroid.visible = v;
+      if (three.approachLine) three.approachLine.visible = v;
+      if (three.deflectLine) three.deflectLine.visible = v;
+    }
+
+    function setSolarVisible(v) {
+      if (three.solarGroup) three.solarGroup.visible = v;
+      if (v && !orbitState.solarInitialized) initSolarSystem();
+    }
+
+    function setNavSelected(mode) {
+      const set = (btn, on) => {
+        if (!btn) return;
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        btn.classList.toggle('bg-gray-900', on);
+        btn.classList.toggle('text-white', on);
+        btn.classList.toggle('bg-gray-200', !on);
+        btn.classList.toggle('text-gray-800', !on);
+      };
+      set(navMap2D, mode === 'map');
+      set(navOrbit3D, mode === 'orbit');
+      set(navSolar, mode === 'sol');
+    }
+
+    function resetCamera() {
+      if (!three.controls) return;
+      if (orbitState.mode === 'orbit') {
+        gsap.to(three.controls.target, { x: 0, y: 0, z: 0, duration: 0.6, ease: 'power2.out', onUpdate: () => three.controls.update() });
+        gsap.to(three.camera.position, { x: 0, y: 0, z: 4.2, duration: 0.6, ease: 'power2.out', onUpdate: () => three.controls.update() });
+      } else if (orbitState.mode === 'sol') {
+        gsap.to(three.controls.target, { x: 0, y: 0, z: 0, duration: 0.6, ease: 'power2.out', onUpdate: () => three.controls.update() });
+        gsap.to(three.camera.position, { x: 0, y: 10, z: 35, duration: 0.6, ease: 'power2.out', onUpdate: () => three.controls.update() });
+      }
+    }
+
+    function updateHUD() {
+      if (!hud || !hudMode || !hudCountdown || !hudScore) return;
+      hudMode.textContent = orbitState.mode === 'sol' ? 'Solar' : (orbitState.mode === 'orbit' ? 'Orbit' : 'Map');
+      const remaining = orbitState.game.active ? Math.max(0, Math.ceil((orbitState.game.endAt - Date.now()) / 1000)) : '--';
+      hudCountdown.textContent = remaining === 0 ? '0' : String(remaining);
+      hudScore.textContent = String(orbitState.game.score);
+      // Show HUD in 3D modes; hide in map unless game is active
+      const visible = (orbitState.mode !== 'map') || orbitState.game.active;
+      hud.classList.toggle('hidden', !visible);
+      // Reset view button visible only in 3D modes
+      if (resetViewBtn) resetViewBtn.classList.toggle('hidden', orbitState.mode === 'map');
+    }
+
+    function showMap2D() {
+      orbitState.mode = 'map';
+      document.getElementById('map').classList.remove('hidden');
+      document.getElementById('orbit3d').classList.add('hidden');
+      setNavSelected('map');
+      setSolarVisible(false);
+      setEarthOnlyVisible(false); // hidden since map is shown
+      if (three.labelRenderer && three.labelRenderer.domElement) three.labelRenderer.domElement.style.display = 'none';
+      showControlPanel();
+      updateHUD();
+      try { localStorage.setItem(PREF_KEY_TAB, 'map'); } catch (e) {}
+    }
+
+    function showOrbit3D() {
+      orbitState.mode = 'orbit';
+      document.getElementById('map').classList.add('hidden');
+      const o = document.getElementById('orbit3d');
+      o.classList.remove('hidden');
+      setNavSelected('orbit');
+      hideControlPanel();
+      setSolarVisible(false);
+      setEarthOnlyVisible(true);
+      if (three.labelRenderer && three.labelRenderer.domElement) three.labelRenderer.domElement.style.display = 'block';
+      if (three.controls) {
+        three.controls.minDistance = 1.4;
+        three.controls.maxDistance = 12;
+        three.camera.position.set(0,0,4.2);
+        three.controls.update();
+      }
+      updateHUD();
+      try { localStorage.setItem(PREF_KEY_TAB, 'orbit'); } catch (e) {}
+      if (!orbitState.initialized) initOrbit3D();
+    }
+
+    function showSolarSystem() {
+      orbitState.mode = 'sol';
+      document.getElementById('map').classList.add('hidden');
+      const o = document.getElementById('orbit3d');
+      o.classList.remove('hidden');
+      setNavSelected('sol');
+      hideControlPanel();
+      if (!orbitState.initialized) initOrbit3D();
+      initSolarSystem();
+      setEarthOnlyVisible(false);
+      setSolarVisible(true);
+      if (three.labelRenderer && three.labelRenderer.domElement) three.labelRenderer.domElement.style.display = 'block';
+      if (three.controls) {
+        three.controls.minDistance = 5;
+        three.controls.maxDistance = 120;
+        three.camera.position.set(0, 10, 35);
+        three.controls.update();
+      }
+      add3DInteractionListeners();
+      updateHUD();
+      try { localStorage.setItem(PREF_KEY_TAB, 'sol'); } catch (e) {}
+    }
+
+    // Top nav bindings
+    if (navMap2D) navMap2D.addEventListener('click', showMap2D);
+    if (navOrbit3D) navOrbit3D.addEventListener('click', showOrbit3D);
+    if (navSolar) navSolar.addEventListener('click', showSolarSystem);
+    if (openControlsBtn) {
+      openControlsBtn.addEventListener('click', showControlPanel);
+    }
+    if (closeControlsBtn) {
+      closeControlsBtn.addEventListener('click', hideControlPanel);
+    }
+    if (resetViewBtn) {
+      resetViewBtn.addEventListener('click', resetCamera);
+    }
+
+    // Keyboard shortcuts: 1=Map, 2=Orbit, 3=Solar, R=Reset camera
+    document.addEventListener('keydown', (e) => {
+      if (e.target && ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.key === '1') { showMap2D(); }
+      else if (e.key === '2') { showOrbit3D(); }
+      else if (e.key === '3') { showSolarSystem(); }
+      else if (e.key.toLowerCase() === 'r') { resetCamera(); }
+    });
+
+    // Restore preferences
+    (function restorePrefs(){
+      try {
+        const tab = localStorage.getItem(PREF_KEY_TAB);
+        const ctrl = localStorage.getItem(PREF_KEY_CONTROLS);
+        if (tab === 'sol') { showSolarSystem(); }
+        else if (tab === 'orbit') { showOrbit3D(); }
+        else { showMap2D(); }
+        if (tab === 'orbit') {
+          if (ctrl === 'visible') showControlPanel(); else hideControlPanel();
+        } else if (tab === 'map') {
+          if (ctrl === 'hidden') hideControlPanel(); else showControlPanel();
+        } // in solar system we keep controls hidden unless user reopens
+      } catch (e) { /* ignore */ }
+    })();
+    updateHUD();
+
+    if (orbitSpeedEl && orbitSpeedOut) {
+      orbitSpeedEl.addEventListener('input', (e) => {
+        orbitState.speed = parseFloat(e.target.value);
+        orbitSpeedOut.textContent = e.target.value;
+      });
+    }
+
+    if (strategyEl) {
+      strategyEl.addEventListener('change', (e) => {
+        orbitState.strategy = e.target.value;
+      });
+    }
+
+    if (launchBtn) {
+      launchBtn.addEventListener('click', () => {
+        orbitState.autoDeflect = true;
+        if (orbitState.initialized && orbitState.t < orbitState.tDeflect && orbitState.strategy !== 'none') {
+          // force immediate deflection
+          orbitState.t = orbitState.tDeflect;
+          orbitState.deflected = true;
+          announce('Manual deflection executed.');
+          rebuildOrbitPaths();
+        }
+      });
+    }
+
+    if (startGameBtn) {
+      startGameBtn.addEventListener('click', () => startGame());
+    }
+
+    // Simple storytelling steps
+    const STORY_STEPS = [
+      'A newly detected NEO is on a potential collision course. Your mission: plan a deflection.',
+      'Choose a deflection strategy and simulate the outcome in 3D.',
+      'Tune approach speed and diameter — larger objects require earlier interventions.',
+      'Launch your deflection and monitor the closest approach distance.',
+      'If the miss distance exceeds Earth radius, humanity is safe this round.'
+    ];
+    let storyIdx = 0;
+    function updateStory() {
+      const text = document.getElementById('storyText');
+      if (text) text.textContent = STORY_STEPS[storyIdx] || STORY_STEPS[STORY_STEPS.length - 1];
+    }
+
+    if (storyBtn) {
+      storyBtn.addEventListener('click', () => {
+        storyIdx = 0; updateStory(); storyPanel.classList.remove('hidden');
+      });
+    }
+    if (storyNext) {
+      storyNext.addEventListener('click', () => { storyIdx = Math.min(STORY_STEPS.length - 1, storyIdx + 1); updateStory(); });
+    }
+    if (storyClose) {
+      storyClose.addEventListener('click', () => storyPanel.classList.add('hidden'));
+    }
+
+    function drawResults(lat, lon, res) {
+      const r = res.results;
+      // Update results UI
+      document.getElementById('energyMT').textContent = `${roundTo(r.energy_megatons, 3)}`;
+      document.getElementById('craterRadius').textContent = `${roundTo(r.crater_radius_m, 1)}`;
+      document.getElementById('seismic').textContent = `${roundTo(r.seismic_mw, 2)}`;
+      document.getElementById('rSevere').textContent = `${roundTo(r.damage_radii_km.severe, 2)}`;
+      document.getElementById('rModerate').textContent = `${roundTo(r.damage_radii_km.moderate, 2)}`;
+      document.getElementById('rLight').textContent = `${roundTo(r.damage_radii_km.light, 2)}`;
+
+      clearOverlays();
+
+      // Marker at impact site
+      impactMarker = L.marker([lat, lon]).addTo(map);
+
+      // Targets in meters
+      const craterTarget = Math.max(1, r.crater_radius_m);
+      const severeTarget = r.damage_radii_km.severe * 1000.0;
+      const moderateTarget = r.damage_radii_km.moderate * 1000.0;
+      const lightTarget = r.damage_radii_km.light * 1000.0;
+
+      // Create circles with initial radius 0; animate to targets
+      craterCircle = L.circle([lat, lon], {
+        radius: 0,
+        color: '#dc2626',
+        fillColor: '#ef4444',
+        fillOpacity: 0.3,
+        weight: 2
+      }).addTo(map);
+
+      severeCircle = L.circle([lat, lon], {
+        radius: 0,
+        color: '#f97316',
+        fillColor: '#fb923c',
+        fillOpacity: 0.25,
+        weight: 2
+      }).addTo(map);
+
+      moderateCircle = L.circle([lat, lon], {
+        radius: 0,
+        color: '#f59e0b',
+        fillColor: '#fbbf24',
+        fillOpacity: 0.22,
+        weight: 2
+      }).addTo(map);
+
+      lightCircle = L.circle([lat, lon], {
+        radius: 0,
+        color: '#eab308',
+        fillColor: '#fde047',
+        fillOpacity: 0.2,
+        weight: 2
+      }).addTo(map);
+
+      // Play asteroid animation to the impact point
+      playImpactAnimation(lat, lon);
+
+      // Animate radii outward with slight staggering
+      animateCircleRadius(craterCircle, craterTarget, 0.6, 0.2);
+      animateCircleRadius(severeCircle, severeTarget, 1.0, 0.05);
+      animateCircleRadius(moderateCircle, moderateTarget, 1.1, 0.1);
+      animateCircleRadius(lightCircle, lightTarget, 1.2, 0.15);
+    }
+
+    document.getElementById('simulateBtn').addEventListener('click', () => {
+      const d = parseFloat(document.getElementById('diameter').value);
+      const v = parseFloat(document.getElementById('velocity').value);
+      const lat = parseFloat(document.getElementById('latitude').value);
+      const lon = parseFloat(document.getElementById('longitude').value);
+
+      if (!isFinite(d) || d <= 0 || !isFinite(v) || v <= 0 || !isFinite(lat) || !isFinite(lon)) {
+        alert('Please enter valid numeric parameters.');
+        return;
+      }
+
+      // sync 3D params
+      orbitState.diameter = d;
+      if (three.asteroid) {
+        three.asteroid.geometry.dispose();
+        three.asteroid.geometry = new THREE.SphereGeometry(Math.max(0.06, d / 4000), 16, 16);
+      }
+
+      const sim = simulateImpact(d, v, lat, lon);
+
+      // Recenter map
+      map.setView([lat, lon], 7);
+
+      drawResults(lat, lon, sim);
+    });
+  </script>
+</body>
+</html>
