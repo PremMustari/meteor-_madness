@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Celestial Sentinels | Planetary Defense Project</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    body {
+      background: linear-gradient(to right, #1e3a8a, #3b82f6);
+      color: white;
+      font-family: 'Poppins', sans-serif;
+    }
+    .hero {
+      background: url('assets/bg.jpg') center/cover no-repeat;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+      backdrop-filter: brightness(0.8);
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 1.5rem;
+      padding: 2rem;
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <section class="hero px-6">
+    <div class="glass mx-auto max-w-3xl">
+      <h1 class="text-5xl font-bold mb-4">🌌 Celestial Sentinels</h1>
+      <p class="text-lg mb-6">
+        Our mission: To simulate and visualize potential asteroid impacts on Earth using real-time data,
+        advanced physics models, and interactive 3D visualizations — ensuring better preparedness for
+        planetary defense.
+      </p>
+      <a href="index.html" class="bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-semibold px-6 py-3 rounded-full transition">
+        🚀 Launch Simulation
+      </a>
+    </div>
+  </section>
+
+  <section class="p-10 bg-white text-gray-800 text-center">
+    <h2 class="text-3xl font-bold mb-4">About the Project</h2>
+    <p class="max-w-4xl mx-auto text-lg">
+      The Celestial Sentinels initiative is dedicated to studying near-Earth objects (NEOs) and their potential impact on our planet.
+      Using NASA’s open data and physics-based simulations, we aim to create an interactive platform that models asteroid trajectories,
+      visualizes impacts in real time, and demonstrates the importance of planetary defense strategies.
+    </p>
+  </section>
+
+  <footer class="text-center text-sm text-gray-200 bg-gray-900 py-4">
+    <p>© 2025 Celestial Sentinels — A NASA Space Apps Innovation</p>
+  </footer>
+</body>
+</html>
